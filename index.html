@@ -716,6 +716,13 @@
 <!-- ═══ SCAN PAGE ═══ -->
 <div class="page active" id="page-scan">
 
+  <!-- ปุ่มย้อนกลับ (โชว์ตอนกล้องเปิด) -->
+  <div id="cam-back-bar" style="display:none;padding:8px 16px 0">
+    <button onclick="cancelScan()" style="display:flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:8px 14px;color:var(--muted);font-family:'Sarabun',sans-serif;font-size:14px;cursor:pointer;">
+      ← ย้อนกลับ / ปิดกล้อง
+    </button>
+  </div>
+
   <div class="scanner-wrapper" id="scanner-wrapper">
     <div class="cam-start" id="cam-start" onclick="startCamera()">
       <div class="cam-icon">📷</div>
@@ -772,14 +779,24 @@
     <div id="diff-display" style="margin-bottom:14px"></div>
 
     <button class="btn btn-primary" onclick="saveCount()">✅ บันทึกยอดนับ</button>
-    <button class="btn btn-ghost" onclick="cancelScan()">ยกเลิก</button>
+    <button class="btn btn-ghost" onclick="cancelScan()">← ยกเลิก / ย้อนกลับ</button>
   </div>
 
-  <!-- Manual input fallback -->
-  <div style="margin-top:8px" id="manual-fallback">
+  <!-- ค้นหาชื่อสินค้า -->
+  <div style="margin-top:16px" id="manual-fallback">
+
+    <!-- Search box -->
+    <div style="margin-bottom:14px">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">🔎 ค้นหาชื่อสินค้า</div>
+      <input id="product-search" type="text" placeholder="พิมพ์ชื่อหรือรหัสสินค้า..."
+        style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px;color:var(--text);font-family:'Sarabun',sans-serif;font-size:14px;outline:none;"
+        oninput="searchProducts(this.value)">
+      <div id="product-search-results" style="margin-top:6px;max-height:220px;overflow-y:auto;border-radius:12px;"></div>
+    </div>
+
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
       <div style="flex:1;height:1px;background:var(--border)"></div>
-      <span style="font-size:11px;color:var(--muted)">หรือกรอกรหัสเอง</span>
+      <span style="font-size:11px;color:var(--muted)">หรือกรอกรหัส / barcode เอง</span>
       <div style="flex:1;height:1px;background:var(--border)"></div>
     </div>
     <div style="display:flex;gap:8px">
@@ -1077,6 +1094,7 @@ function switchTab(tab) {
 // CAMERA / SCANNER (ZXing)
 // ─────────────────────────────────────────
 async function startCamera() {
+  document.getElementById('cam-back-bar').style.display = 'block';
   document.getElementById('cam-start').style.display = 'none';
   document.getElementById('scan-overlay').style.display = 'flex';
   document.getElementById('scan-hint').style.display = 'block';
@@ -1135,6 +1153,7 @@ function resetCamera() {
   torchOn = false; currentTrack = null; currentZoom = 1;
   const video = document.getElementById('reader');
   video.style.display = 'none'; video.srcObject = null;
+  document.getElementById('cam-back-bar').style.display = 'none';
   document.getElementById('cam-start').style.display = 'flex';
   document.getElementById('scan-overlay').style.display = 'none';
   document.getElementById('scan-hint').style.display = 'none';
@@ -1178,6 +1197,37 @@ function onScanSuccess(code) {
   if (currentProduct) return; // already showing result
   stopCamera();
   lookupCode(code.trim());
+}
+
+function searchProducts(q) {
+  const box = document.getElementById('product-search-results');
+  if (!q || q.length < 2) { box.innerHTML = ''; return; }
+  const kw = q.toLowerCase();
+  const hits = products.filter(p =>
+    p.name.toLowerCase().includes(kw) ||
+    p.code.toLowerCase().includes(kw) ||
+    (p.barcodes && p.barcodes.some(b => b.includes(kw)))
+  ).slice(0, 8);
+
+  if (!hits.length) {
+    box.innerHTML = `<div style="padding:10px 14px;font-size:13px;color:var(--muted)">ไม่พบสินค้าที่ตรงกัน</div>`;
+    return;
+  }
+  box.innerHTML = hits.map(p => `
+    <div onclick="selectProductFromSearch('${p.code}')"
+      style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);background:var(--surface);font-size:13px;transition:background 0.15s"
+      onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background='var(--surface)'">
+      <div style="font-weight:700;color:var(--text)">${p.name}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px;font-family:'JetBrains Mono',monospace">${p.code} · ระบบ: ${p.systemQty} ${p.category}</div>
+    </div>`).join('');
+  box.style.border = '1px solid var(--border)';
+  box.style.background = 'var(--surface)';
+}
+
+function selectProductFromSearch(code) {
+  document.getElementById('product-search').value = '';
+  document.getElementById('product-search-results').innerHTML = '';
+  lookupCode(code);
 }
 
 function lookupManual() {
@@ -1267,6 +1317,8 @@ function cancelScan() {
   currentProduct = null;
   document.getElementById('result-card').classList.remove('show');
   document.getElementById('manual-code').value = '';
+  document.getElementById('product-search').value = '';
+  document.getElementById('product-search-results').innerHTML = '';
   document.getElementById('manual-fallback').style.display = 'block';
   resetCamera();
 }
