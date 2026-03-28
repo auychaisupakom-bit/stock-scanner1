@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>นับสต๊อก · Scanner</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/zxing-js/0.21.3/umd/index.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
 
@@ -729,7 +729,7 @@
       <div class="cam-text">กดเพื่อเปิดกล้อง</div>
       <div class="cam-sub">รองรับ QR Code และ Barcode<br>ทุกรูปแบบ</div>
     </div>
-    <video id="reader" style="display:none;width:100%;height:260px;object-fit:cover" playsinline></video>
+    <div id="reader" style="display:none;width:100%"></div>
     <canvas id="reader-canvas" style="display:none"></canvas>
     <div class="scan-overlay" id="scan-overlay" style="display:none">
       <div class="scan-frame">
@@ -989,16 +989,18 @@ const EMBEDDED_BC_TO_SKU = {"8850678305066": "110100350112", "8850678305073": "1
 // ─────────────────────────────────────────
 let products = [];
 let counts   = {};
-let scanner  = null;
 let scanning = false;
 let torchOn  = false;
 let currentTrack = null;
 let currentProduct = null;
+let currentZoom = 1;
 let currentUser = '';
 let currentZone = '';
 let selectedZoneChip = '';
 let mergeFiles = [];
 let mergedData = [];
+let unknownCounts = {};
+try { const u2 = localStorage.getItem('stock_unknown'); if(u2) unknownCounts = JSON.parse(u2); } catch(e) {}
 
 // Load from localStorage
 try {
@@ -1091,50 +1093,65 @@ function switchTab(tab) {
 }
 
 // ─────────────────────────────────────────
-// CAMERA / SCANNER (ZXing)
+// CAMERA / SCANNER (html5-qrcode)
 // ─────────────────────────────────────────
+let html5Scanner = null;
+
 async function startCamera() {
+  if (scanning) return;
   document.getElementById('cam-back-bar').style.display = 'block';
   document.getElementById('cam-start').style.display = 'none';
   document.getElementById('scan-overlay').style.display = 'flex';
   document.getElementById('scan-hint').style.display = 'block';
   document.getElementById('manual-fallback').style.display = 'none';
   document.getElementById('torch-btn').style.display = 'flex';
-  const video = document.getElementById('reader');
-  video.style.display = 'block';
+  document.getElementById('reader').style.display = 'block';
+
+  html5Scanner = new Html5Qrcode('reader');
+
+  const config = {
+    fps: 15,
+    qrbox: { width: 280, height: 180 },
+    aspectRatio: 1.5,
+    formatsToSupport: [
+      Html5QrcodeSupportedFormats.EAN_13,
+      Html5QrcodeSupportedFormats.EAN_8,
+      Html5QrcodeSupportedFormats.CODE_128,
+      Html5QrcodeSupportedFormats.CODE_39,
+      Html5QrcodeSupportedFormats.QR_CODE,
+      Html5QrcodeSupportedFormats.UPC_A,
+      Html5QrcodeSupportedFormats.UPC_E,
+      Html5QrcodeSupportedFormats.ITF,
+      Html5QrcodeSupportedFormats.DATA_MATRIX,
+    ],
+    experimentalFeatures: { useBarCodeDetectorIfSupported: true }
+  };
 
   try {
-    videoStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
-    });
-    video.srcObject = videoStream;
-    await video.play();
+    await html5Scanner.start(
+      { facingMode: 'environment' },
+      config,
+      (code) => onScanSuccess(code),
+      () => {}
+    );
     scanning = true;
-    currentTrack = videoStream.getVideoTracks()[0];
 
-    // ตรวจสอบ zoom capability
-    const caps = currentTrack.getCapabilities ? currentTrack.getCapabilities() : {};
-    if (caps.zoom) {
-      document.getElementById('zoom-wrap').classList.add('show');
-      document.getElementById('zoom-btns').style.display = 'flex';
-      document.getElementById('zoom-slider').max = Math.min(caps.zoom.max, 8);
-    }
-
-    // Init ZXing
-    if (!zxingReader) zxingReader = new ZXing.BrowserMultiFormatReader();
-
-    // Scan loop
-    const canvas = document.getElementById('reader-canvas');
-    const ctx = canvas.getContext('2d');
-    scanInterval = setInterval(async () => {
-      if (!scanning || currentProduct) return;
-      try {
-        canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-        ctx.drawImage(video, 0, 0);
-        const result = await zxingReader.decodeFromCanvas(canvas);
-        if (result) onScanSuccess(result.getText());
-      } catch(e) {}
-    }, 150);
+    // ดึง track สำหรับ torch และ zoom
+    setTimeout(() => {
+      const video = document.querySelector('#reader video');
+      if (video && video.srcObject) {
+        const tracks = video.srcObject.getVideoTracks();
+        if (tracks.length > 0) {
+          currentTrack = tracks[0];
+          const caps = currentTrack.getCapabilities ? currentTrack.getCapabilities() : {};
+          if (caps.zoom) {
+            document.getElementById('zoom-wrap').classList.add('show');
+            document.getElementById('zoom-btns').style.display = 'flex';
+            document.getElementById('zoom-slider').max = Math.min(caps.zoom.max, 8);
+          }
+        }
+      }
+    }, 1000);
 
   } catch(err) {
     showToast('ไม่สามารถเปิดกล้องได้', 'err');
@@ -1144,17 +1161,18 @@ async function startCamera() {
 
 function stopCamera() {
   scanning = false;
-  if (scanInterval) { clearInterval(scanInterval); scanInterval = null; }
-  if (videoStream)  { videoStream.getTracks().forEach(t => t.stop()); videoStream = null; }
+  if (html5Scanner) {
+    html5Scanner.stop().catch(() => {});
+    html5Scanner = null;
+  }
 }
 
 function resetCamera() {
   stopCamera();
   torchOn = false; currentTrack = null; currentZoom = 1;
-  const video = document.getElementById('reader');
-  video.style.display = 'none'; video.srcObject = null;
   document.getElementById('cam-back-bar').style.display = 'none';
   document.getElementById('cam-start').style.display = 'flex';
+  document.getElementById('reader').style.display = 'none';
   document.getElementById('scan-overlay').style.display = 'none';
   document.getElementById('scan-hint').style.display = 'none';
   document.getElementById('torch-btn').style.display = 'none';
