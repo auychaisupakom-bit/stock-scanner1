@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>นับสต๊อก · Scanner</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
 
@@ -690,7 +692,10 @@
     <div class="topbar-title">📦 นับสต๊อก</div>
     <div class="topbar-sub" id="topbar-sub-text">Handheld Scanner</div>
   </div>
-  <div class="badge" id="count-badge">0 / 437</div>
+  <div style="display:flex;align-items:center;gap:8px">
+    <span id="firebase-status" style="font-size:11px;color:var(--muted)">⏳ กำลังเชื่อม...</span>
+    <div class="badge" id="count-badge">0 / 437</div>
+  </div>
 </div>
 <div class="zone-banner" id="zone-banner" style="display:none">
   <div>
@@ -904,6 +909,16 @@ B001,นมกล่อง,เครื่องดื่ม,120"></textarea>
     </div>
   </div>
 
+  <div class="section-label">ซิงค์ข้อมูล</div>
+
+  <button class="export-btn" onclick="syncAllToFirebase()" id="sync-all-btn">
+    <div class="export-icon">☁️</div>
+    <div class="export-text">
+      <div class="export-name">ซิงค์ทั้งหมดขึ้น Firebase</div>
+      <div class="export-desc">อัปโหลดยอดนับทั้งหมดที่มีอยู่ขึ้น cloud</div>
+    </div>
+  </button>
+
   <div class="section-label">ส่งออกผลการนับ</div>
 
   <button class="export-btn" onclick="exportCSV()">
@@ -987,6 +1002,62 @@ const EMBEDDED_BC_TO_SKU = {"8850678305066": "110100350112", "8850678305073": "1
 // ─────────────────────────────────────────
 // STATE
 // ─────────────────────────────────────────
+// ─────────────────────────────────────────
+// FIREBASE CONFIG & REALTIME SYNC
+// ─────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyARkGv9gkGBxCfG650VSSiP8_Qey4Lfji8",
+  authDomain: "stock-scanner-12912.firebaseapp.com",
+  databaseURL: "https://stock-scanner-12912-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "stock-scanner-12912",
+  storageBucket: "stock-scanner-12912.firebasestorage.app",
+  messagingSenderId: "269344329100",
+  appId: "1:269344329100:web:162570a1ad90202435daa9"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+// sync counts ขึ้น Firebase
+function syncToFirebase(code, qty, productName, zone, user) {
+  const ref = db.ref('counts/' + code.replace(/[.#$/[\]]/g, '_'));
+  ref.set({
+    code, qty,
+    name: productName || '',
+    zone: zone || currentZone,
+    user: user || currentUser,
+    updatedAt: Date.now()
+  });
+}
+
+// ฟังการเปลี่ยนแปลงจากคนอื่น real-time
+function startFirebaseListener() {
+  db.ref('counts').on('value', (snapshot) => {
+    const data = snapshot.val();
+    if (!data) return;
+    Object.values(data).forEach(item => {
+      if (item && item.code) {
+        counts[item.code] = item.qty;
+      }
+    });
+    try { localStorage.setItem('stock_counts', JSON.stringify(counts)); } catch(e) {}
+    updateBadge();
+    // อัปเดต UI ถ้ากำลังดูรายการอยู่
+    const listPage = document.getElementById('page-list');
+    if (listPage && listPage.classList.contains('active')) renderList();
+  });
+}
+
+// แสดง online indicator
+function updateOnlineStatus() {
+  db.ref('.info/connected').on('value', (snap) => {
+    const el = document.getElementById('firebase-status');
+    if (el) {
+      el.textContent = snap.val() ? '🟢 ซิงค์แล้ว' : '🔴 ออฟไลน์';
+      el.style.color = snap.val() ? 'var(--green)' : 'var(--red)';
+    }
+  });
+}
+
 let products = [];
 let counts   = {};
 let scanning = false;
@@ -1060,6 +1131,8 @@ function startApp() {
   document.getElementById('banner-zone').textContent = zone;
   document.getElementById('topbar-sub-text').textContent = 'Handheld Scanner';
   updateBadge();
+  startFirebaseListener();
+  updateOnlineStatus();
 }
 
 // If already set up, skip setup
@@ -1070,6 +1143,8 @@ if (currentUser && currentZone) {
   document.getElementById('tabs-and-pages').style.display = 'block';
   document.getElementById('banner-name').textContent = currentUser;
   document.getElementById('banner-zone').textContent = currentZone;
+  startFirebaseListener();
+  updateOnlineStatus();
 }
 
 function save() {
@@ -1319,10 +1394,14 @@ function saveCount() {
     currentProduct.name = name;
     unknownCounts[currentProduct.code] = { code: currentProduct.code, name, qty };
     try { localStorage.setItem('stock_unknown', JSON.stringify(unknownCounts)); } catch(e) {}
+    // sync unknown ขึ้น Firebase ด้วย
+    syncToFirebase(currentProduct.code, qty, name, currentZone, currentUser);
     showToast(`📝 บันทึก "${name}" ${qty} ชิ้น`, 'warn');
   } else {
     counts[currentProduct.code] = qty;
     save();
+    // sync ขึ้น Firebase real-time
+    syncToFirebase(currentProduct.code, qty, currentProduct.name, currentZone, currentUser);
     const diff = isNaN(parseInt(currentProduct.systemQty)) ? null : qty - parseInt(currentProduct.systemQty);
     if (diff === null) showToast('💾 บันทึกแล้ว', 'ok');
     else if (diff === 0) showToast('✅ ยอดตรง! บันทึกแล้ว', 'ok');
@@ -1569,6 +1648,36 @@ function renderSummary() {
 // ─────────────────────────────────────────
 // EXPORT
 // ─────────────────────────────────────────
+function syncAllToFirebase() {
+  const items = Object.keys(counts);
+  if (!items.length) { showToast('ไม่มีข้อมูลที่จะซิงค์', 'warn'); return; }
+
+  const btn = document.getElementById('sync-all-btn');
+  const desc = btn.querySelector('.export-desc');
+  desc.textContent = `กำลังซิงค์ ${items.length} รายการ...`;
+  btn.style.opacity = '0.6';
+  btn.style.pointerEvents = 'none';
+
+  let done = 0;
+  items.forEach(code => {
+    const prod = products.find(p => p.code === code);
+    syncToFirebase(code, counts[code], prod ? prod.name : '', currentZone, currentUser);
+    done++;
+    if (done === items.length) {
+      // sync unknown ด้วย
+      Object.values(unknownCounts).forEach(u => {
+        syncToFirebase(u.code, u.qty, u.name, currentZone, currentUser);
+      });
+      setTimeout(() => {
+        desc.textContent = `✅ ซิงค์ ${items.length} รายการเสร็จแล้ว!`;
+        btn.style.opacity = '1';
+        btn.style.pointerEvents = 'auto';
+        showToast(`☁️ ซิงค์ขึ้น Firebase ${items.length} รายการแล้ว!`, 'ok');
+      }, 800);
+    }
+  });
+}
+
 function exportCSV() {
   let rows = [['รหัสสินค้า','ชื่อสินค้า','หมวดหมู่','ยอดระบบ','ยอดนับ','ผลต่าง','สถานะ','โซน','ผู้นับ']];
   products.forEach(p => {
