@@ -1649,16 +1649,17 @@ const BATCHES_MAP = {"110100350112":[{"qty":470,"exp":1878249600000,"dateIn":"20
 // ─────────────────────────────────────────
 // FIREBASE CONFIG & REALTIME SYNC
 // ─────────────────────────────────────────
-// Firebase project: stock-scanner-ekkamai
-// Realtime Database URL: https://stock-scanner-ekkamai-default-rtdb.asia-southeast1.firebasedatabase.app
+// Firebase project: stock-scanner-12912 (สาขาอารีย์ / Ari)
+// Realtime Database URL: https://stock-scanner-12912-default-rtdb.asia-southeast1.firebasedatabase.app
 const firebaseConfig = {
-  apiKey: "AIzaSyDNj3h3hmZLDILBgD5ImJ9v4t7arIEN9r0",
-  authDomain: "stock-scanner-ekkamai.firebaseapp.com",
-  databaseURL: "https://stock-scanner-ekkamai-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "stock-scanner-ekkamai",
-  storageBucket: "stock-scanner-ekkamai.firebasestorage.app",
-  messagingSenderId: "618656194898",
-  appId: "1:618656194898:web:7579cb2065384c3f3a1a8b"
+  apiKey: "AIzaSyARkGv9gkGBxCfG650VSSiP8_Qey4Lfji8",
+  authDomain: "stock-scanner-12912.firebaseapp.com",
+  databaseURL: "https://stock-scanner-12912-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "stock-scanner-12912",
+  storageBucket: "stock-scanner-12912.firebasestorage.app",
+  messagingSenderId: "269344329100",
+  appId: "1:269344329100:web:162570a1ad90202435daa9",
+  measurementId: "G-TW3NNLD8NP"
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
@@ -1670,7 +1671,7 @@ const db = firebase.database();
 // ถ้าไม่ตรง = รอบใหม่ → ล้างยอดนับทั้งหมด (ทั้ง Firebase กลาง + local)
 // ผู้ใช้/โซนยังจำไว้ ไม่ต้องกรอกใหม่
 // ─────────────────────────────────────────
-const STOCKTAKE_ROUND = '2026-05-15-ekkamai';
+const STOCKTAKE_ROUND = '2026-05-17-ari';
 (function maybeResetForNewRound() {
   try {
     const last = localStorage.getItem('stock_round');
